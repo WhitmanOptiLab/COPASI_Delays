@@ -42,6 +42,7 @@
 #include "copasi/steadystate/CNewtonMethod.h"
 // #include "copasi/steadystate/CSteadyStateMethod.h"
 // #include "copasi/trajectory/CExpRKMethod.h"
+#include "copasi/trajectory/CDdeintMethod.h" // ADDED THIS LINE
 #include "copasi/trajectory/CHybridMethodODE45.h"
 #include "copasi/trajectory/CLsodaMethod.h"
 #include "copasi/trajectory/CRadau5Method.h"
@@ -266,6 +267,11 @@ CCopasiMethod * CMethodFactory::create(const CTaskEnum::Task & taskType,
       case CTaskEnum::Method::timeSensLsoda:
         pMethod = new CTimeSensLsodaMethod(pParent, methodType, taskType);
         break;
+
+      // DDEINT 
+      case CTaskEnum::Method::DDEINT: 
+        pMethod = new CDdeintMethod(pParent, methodType, taskType);
+        break;
     }
 
   if (pMethod != NULL
@@ -474,6 +480,12 @@ CCopasiMethod * CMethodFactory::copy(const CCopasiMethod * pSrc, const CDataCont
       case CTaskEnum::Method::timeSensLsoda:
         pCopy = new CTimeSensLsodaMethod(*static_cast< const CTimeSensLsodaMethod * >(pSrc), pParent);
         break;
+
+      // DDEINT 
+      case CTaskEnum::Method::DDEINT: 
+        pCopy = new CDdeintMethod(*static_cast< const CDdeintMethod * >(pSrc), pParent);
+        break;
+
     }
 
   if (pCopy != NULL

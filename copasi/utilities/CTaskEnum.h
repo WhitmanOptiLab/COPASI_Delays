@@ -110,6 +110,7 @@ public:
     linearNoiseApproximation,
     analyticsMethod,
     timeSensLsoda,
+    DDEINT,
     __SIZE
   };
 

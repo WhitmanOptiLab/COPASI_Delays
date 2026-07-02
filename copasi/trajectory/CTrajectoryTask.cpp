@@ -82,6 +82,7 @@ const CTaskEnum::Method CTrajectoryTask::ValidMethods[] =
   CTaskEnum::Method::DsaLsodar,
 #endif // COPASI_DEBUG
   CTaskEnum::Method::stochasticRunkeKuttaRI5,
+  CTaskEnum::Method::DDEINT, // ADDED THIS LINE 
   CTaskEnum::Method::UnsetMethod
 };
 

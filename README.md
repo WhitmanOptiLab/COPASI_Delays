@@ -150,3 +150,72 @@ git add .
 git commit -a -m " - add documentation for COPASI 4.40.278"
 git push
 ```
+
+## COPASI DELAYED FOR FUTURE REFERENCE
+
+## Prerequisites & Installation
+
+### 1. Install System Packages (macOS)
+
+If you're using macOS, install the required dependencies with Homebrew:
+
+```bash
+brew install cmake qt@5
+```
+
+### 2. Clone the Required Repositories
+
+This project depends on a sibling repository containing the core scientific libraries (Raptor, Expat, SBML, etc.). Therefore, you must Clone `copasi-dependencies` and `COPASI_DELAYS` into the same parent directory and build it with UI support enabled (`-DBUILD_UI_DEPS=ON`) before compiling this project.
+
+## Building and Running
+
+### Step 1 — Initialize Submodules
+
+Initialize all submodules (including the DDEINT library):
+
+```bash
+cd COPASI_Delays
+git submodule update --init --recursive
+```
+
+### Step 2 — Configure and Build
+
+Create a build directory, configure the project, and compile.
+
+```bash
+# Create and enter the build directory
+mkdir -p build
+cd build
+
+# Remove any previous CMake cache
+rm -f CMakeCache.txt
+
+# Configure CMake
+cmake .. \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_GUI=ON \
+  -DCOPASI_DEPENDENCY_DIR=../../dependencies_install \
+  -DRAPTOR_INCLUDE_DIR=../../copasi-dependencies/src/raptor/src \
+  -DQt5_DIR=/opt/homebrew/opt/qt@5/lib/cmake/Qt5
+
+# Build
+make -j$(sysctl -n hw.ncpu)
+```
+
+### Step 3 — Run the Application
+
+After the build completes successfully, launch either the command-line version or the GUI.
+
+#### Command Line
+
+```bash
+./copasi/CopasiSE
+```
+
+#### GUI (macOS)
+
+```bash
+open copasiUI/CopasiUI.app
+```
+
+

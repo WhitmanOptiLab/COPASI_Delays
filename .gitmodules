@@ -1,0 +1,9 @@
+[submodule "copasi/copasi/trajectory/DDEINT"]
+	path = copasi/copasi/trajectory/DDEINT
+	url = https://github.com/WhitmanOptiLab/DDEINT
+[submodule "copasi/trajectory/trajectory/DDEINT"]
+	path = copasi/trajectory/trajectory/DDEINT
+	url = https://github.com/WhitmanOptiLab/DDEINT
+[submodule "copasi/trajectory/DDEINT"]
+	path = copasi/trajectory/DDEINT
+	url = https://github.com/WhitmanOptiLab/DDEINT
