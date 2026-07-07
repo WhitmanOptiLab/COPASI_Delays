@@ -151,11 +151,13 @@ git commit -a -m " - add documentation for COPASI 4.40.278"
 git push
 ```
 
-## COPASI DELAYED FOR FUTURE REFERENCE
+## COPASI + DDEINT (for future reference)
+
+This section documents an in-progress fork of COPASI that integrates DDEINT. These notes are here so that a future contributor can pick up without having to start from scratch.
 
 ## Prerequisites & Installation
 
-### 1. Install System Packages (macOS)
+### 1. Install System Packages (mac os)
 
 If you're using macOS, install the required dependencies with Homebrew:
 
@@ -165,7 +167,9 @@ brew install cmake qt@5
 
 ### 2. Clone the Required Repositories
 
-This project depends on a sibling repository containing the core scientific libraries (Raptor, Expat, SBML, etc.). Therefore, you must Clone `copasi-dependencies` and `COPASI_DELAYS` into the same parent directory and build it with UI support enabled (`-DBUILD_UI_DEPS=ON`) before compiling this project.
+This project depends on another repository containing the core scientific libraries (Raptor, Expat, SBML, etc.). Therefore, you must Clone `copasi-dependencies` and `COPASI_DELAYS` into the same parent directory.
+
+**Note:** If you plan to build a GUI version instead of a command-line `CopasiSE`, add `-DBUILD_UI_DEPS=ON` when configuring `copasi-dependencies`.
 
 ## Building and Running
 
@@ -173,7 +177,7 @@ This project depends on a sibling repository containing the core scientific libr
 
 Initialize all submodules (including the DDEINT library):
 
-```bash
+```
 cd COPASI_Delays
 git submodule update --init --recursive
 ```
@@ -182,40 +186,38 @@ git submodule update --init --recursive
 
 Create a build directory, configure the project, and compile.
 
-```bash
+```
 # Create and enter the build directory
-mkdir -p build
+mkdir build
 cd build
 
 # Remove any previous CMake cache
 rm -f CMakeCache.txt
 
-# Configure CMake
+# Configure CMake (required step — generates the build files)
 cmake .. \
   -DCMAKE_BUILD_TYPE=Release \
-  -DBUILD_GUI=ON \
+  -DBUILD_GUI=OFF \
   -DCOPASI_DEPENDENCY_DIR=../../dependencies_install \
-  -DRAPTOR_INCLUDE_DIR=../../copasi-dependencies/src/raptor/src \
-  -DQt5_DIR=/opt/homebrew/opt/qt@5/lib/cmake/Qt5
+  -DRAPTOR_INCLUDE_DIR=../../copasi-dependencies/src/raptor/src
 
-# Build
+# Build — choose ONE of the following:
+
+# Option 1: using make directly
 make -j$(sysctl -n hw.ncpu)
+
+# Option 2: using CMake's build command
+cmake --build . --parallel
 ```
 
-### Step 3 — Run the Application
 
-After the build completes successfully, launch either the command-line version or the GUI.
 
-#### Command Line
+### Step 3 — Running the Application/Tests
 
-```bash
-./copasi/CopasiSE
+After the build completes successfully, launch the command-line version of COPASI. Below is an example of how to run "Time-Course" for the Breast Cancer Model.
+
 ```
-
-#### GUI (macOS)
-
-```bash
-open copasiUI/CopasiUI.app
+./copasi/CopasiSE --scheduled-task "Time-Course" tests/<file.cps>
 ```
 
 

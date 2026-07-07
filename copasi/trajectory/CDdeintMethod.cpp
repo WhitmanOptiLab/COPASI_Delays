@@ -22,6 +22,19 @@
 // Initialize the static tracking pointer to null at file scope
 CDdeintMethod* CDdeintMethod::spActiveInstance = nullptr;
 
+// Free-function trampoline. This is the symbol bound into DDE_Solver_Type's
+// template parameter (see the typedef in the header), since a
+// pointer-to-member-function can't be used there. It forwards the call on to
+// whichever instance is currently active.
+void CDdeintMethod_dispatch(double t, std::vector<double> &y, std::vector<double> &ydot,
+                             History<double, double> &history)
+{
+  // Safety check to ensure we have a valid object instance running the step
+  if (!CDdeintMethod::spActiveInstance) return;
+
+  CDdeintMethod::spActiveInstance->evalF(t, y, ydot, history);
+}
+
 // Specific Constructor (The one COPASI's factory subsystem will call)
 CDdeintMethod::CDdeintMethod(const CDataContainer * pParent,
                              const CTaskEnum::Method & methodType,
@@ -36,9 +49,14 @@ CDdeintMethod::CDdeintMethod(const CDataContainer * pParent,
   , mTime(0.0)
   , mpSolver(nullptr)
 {
-  // Mirroring LSODA's internal memory validation check
-  assert((void *) &mData == (void *) &mData.dim);
   mData.pMethod = this;
+
+  // Tolerances are method parameters (CCopasiParameter), not properties of
+  // CTrajectoryProblem -- mirrors CLsodaMethod's constructor-time setup.
+  // assertParameter creates the parameter if missing and returns a live
+  // pointer directly into its stored value.
+  mpRelativeTolerance = assertParameter("Relative Tolerance", CCopasiParameter::Type::UDOUBLE, (C_FLOAT64) 1.0e-9);
+  mpAbsoluteTolerance = assertParameter("Absolute Tolerance", CCopasiParameter::Type::UDOUBLE, (C_FLOAT64) 1.0e-9);
 }
 
 
@@ -59,12 +77,12 @@ CDdeintMethod::CDdeintMethod(const CDdeintMethod & src,
   , mPrehistory(src.mPrehistory)
   , mpSolver(nullptr)
 {
-  assert((void *) &mData == (void *) &mData.dim);
   mData.pMethod = this;
 
-  // If the source had an active solver instance, initialize a clean one for this clone.
-  // mData is now copied above, so mData.dim is valid here and in every other member
-  // function that reads it before start() gets called again on the clone.
+  // If the source had an active solver, allocate a fresh one for this clone
+  // instead of copying the pointer, to avoid double-delete/aliasing. We only
+  // copy the solver's setup (dimension, delays, prehistory) above, not its
+  // internal integration state.
   if (src.mpSolver)
     {
       mpSolver = new DDE_Solver_Type(mData.dim, mMaxDelays, mPrehistory);
@@ -75,6 +93,13 @@ CDdeintMethod::CDdeintMethod(const CDdeintMethod & src,
 // Destructor
 CDdeintMethod::~CDdeintMethod()
 {
+  // If this instance was the last one to run, clear the tracker so it
+  // doesn't dangle after this object is destroyed.
+  if (spActiveInstance == this)
+    {
+      spActiveInstance = nullptr;
+    }
+
   delete mpSolver;
 }
 
@@ -89,19 +114,14 @@ void CDdeintMethod::start()
   // Calculate the active ODE/DDE system dimension exactly like LSODA does
   mData.dim = (C_INT)(mContainerState.size() - mpContainer->getCountFixedEventTargets());
 
-  // Point mpY to the first continuous variable state (skipping the time slot at index 0)
+  // mpContainerStateTime[0] is time itself; the real state variables start
+  // at index 1, so mpY/mpYdot skip past it.
   mpY = mpContainerStateTime + 1;
-  
-  // Point mpYdot to the beginning of COPASI's rate calculation array
-  mpYdot = mpContainer->getRate().array() + 1;
+  mpYdot = mpContainer->getRate(false).array() + 1;
 
-  // Extract pointer links to the problem tolerances
-  CTrajectoryProblem* pProblem = static_cast<CTrajectoryProblem*>(mpProblem);
-  if (pProblem)
-    {
-      mpAbsoluteTolerance = pProblem->getAbsoluteToleranceReference();
-      mpRelativeTolerance = pProblem->getRelativeToleranceReference();
-    }
+  // Note: mpAbsoluteTolerance / mpRelativeTolerance are already set up as
+  // method parameters in the constructor via assertParameter(), so no
+  // per-start() lookup against the problem is needed here.
 
   // Synchronize current COPASI state snapshots into our initial condition vector
   mInitConds.resize(mData.dim);
@@ -110,21 +130,24 @@ void CDdeintMethod::start()
       mInitConds[i] = mpY[i];
     }
 
-  // Set up delay allocations (using a baseline placeholder delay of 0.1 for initial system testing)
+  // TODO(delays): placeholder -- every variable currently gets the same fixed
+  // delay (0.1) regardless of the model's actual delay structure. This needs
+  // to read real per-variable delay values before it's usable for anything
+  // beyond initial testing.
   mMaxDelays.assign(mData.dim, 0.1);
+
+  // TODO(prehistory): placeholder -- assumes a flat/constant history (the
+  // initial value) for all t < t0. Real DDE problems may need a non-constant
+  // history function; this will need to be replaced eventually.
   mPrehistory.clear();
   for (C_INT i = 0; i < mData.dim; ++i)
     {
-      // Baseline tracking prehistory: yields the starting state for any historical t < t0
       double initial_val = mInitConds[i];
       mPrehistory.push_back([initial_val](double /*t*/) { return initial_val; });
     }
 
   // Allocate or refresh our DDEInt template instance
-  if (mpSolver)
-    {
-      delete mpSolver;
-    }
+  delete mpSolver;
   mpSolver = new DDE_Solver_Type(mData.dim, mMaxDelays, mPrehistory);
 
   // Initialize the performance configurations and thresholds on your solver
@@ -134,7 +157,7 @@ void CDdeintMethod::start()
   double atol = mpAbsoluteTolerance ? *mpAbsoluteTolerance : 1e-9;
   double rtol = mpRelativeTolerance ? *mpRelativeTolerance : 1e-9;
 
-  mpSolver->initialize(mTime, initial_h, min_h, mInitConds, atol, rtol, false, false);
+  mpSolver->initialize(mTime, initial_h, min_h, mInitConds, atol, rtol, false);
 }
 
 // Step: Progress the integration forward by deltaT
@@ -144,12 +167,19 @@ CTrajectoryMethod::Status CDdeintMethod::step(const double & deltaT, const bool 
 
   double targetTime = mTime + deltaT;
 
-  // CRITICAL: Point the static instance tracker to 'this' right before launching the solver loop
+  // Point the static instance tracker to 'this' right before launching the
+  // solver, so CDdeintMethod_dispatch() (called from inside integrate_to())
+  // knows which object's evalF() to invoke.
+  // NOTE: not thread-safe -- assumes only one CDdeintMethod instance steps
+  // at a time, which holds for COPASI's current single-threaded trajectory
+  // task but would break under any future parallel execution.
   spActiveInstance = this;
 
   try
     {
-      // Request your DoPri_5 solver to step forward to the targeted interval marker
+      // TODO: 10000 is an unexplained internal step-count cap. Consider
+      // wiring this to mpMaxInternalSteps (currently unused, see header)
+      // instead of leaving it hardcoded here.
       std::vector<double> next_state = mpSolver->integrate_to(targetTime, 10000);
 
       // Sync the integrated values back directly into COPASI's active runtime state
@@ -168,26 +198,27 @@ CTrajectoryMethod::Status CDdeintMethod::step(const double & deltaT, const bool 
 
       return NORMAL;
     }
-  catch (const std::exception & /*e*/)
+  catch (const std::exception & e)
     {
+      // TODO: mErrorMsg is captured but not yet surfaced to the user. LSODA
+      // reports its equivalent via CCopasiMessage(CCopasiMessage::EXCEPTION,
+      // MCTrajectoryMethod + 6, ...), but that message ID is specific to
+      // LSODA's own error text -- DDEINT should get its own registered
+      // message ID before doing the same here.
+      mErrorMsg.str("");
+      mErrorMsg << "CDdeintMethod: integration failed: " << e.what();
       return FAILURE;
     }
 }
 
-// Static Bridge: Catches the raw function pointer execution call from DoPri_5
-void CDdeintMethod::EvalF(double t, std::vector<double> &y, std::vector<double> &ydot, History<double, double> &/*history*/)
+// evalF: the right-hand-side function the solver calls (via
+// CDdeintMethod_dispatch -> spActiveInstance) every time it needs a
+// derivative evaluation. Called potentially many times per step(), including
+// at intermediate/rejected stage values, not just once per accepted step.
+void CDdeintMethod::evalF(double t, std::vector<double> &y, std::vector<double> &ydot,
+                           History<double, double> &/*history*/)
 {
-  // Safety check to ensure we have a valid object instance running the step
-  if (!spActiveInstance) return;
-
-  // Pass execution directly over to the active member method
-  spActiveInstance->evalF(t, y, ydot);
-}
-
-// Member Evaluation: Drives COPASI's internal math matrix update loop
-void CDdeintMethod::evalF(double t, std::vector<double> &y, std::vector<double> &ydot)
-{
-  // 1. Write the solver's current testing state directly into COPASI's state vector memory maps
+  // 1. Write the solver's current trial state into COPASI's live state memory
   *mpContainerStateTime = t;
   for (C_INT i = 0; i < mData.dim; ++i)
     {
@@ -197,7 +228,7 @@ void CDdeintMethod::evalF(double t, std::vector<double> &y, std::vector<double> 
   // 2. Force COPASI to recalculate algebraic equations, assignments, and rates
   mpContainer->updateSimulatedValues(*mpReducedModel);
 
-  // 3. Extract the freshly calculated derivatives directly from COPASI's mpYdot array
+  // 3. Read the freshly calculated derivatives back out for the solver
   for (C_INT i = 0; i < mData.dim; ++i)
     {
       ydot[i] = mpYdot[i];
@@ -235,7 +266,7 @@ void CDdeintMethod::stateChange(const CMath::StateChange & /*change*/)
       double atol = mpAbsoluteTolerance ? *mpAbsoluteTolerance : 1e-9;
       double rtol = mpRelativeTolerance ? *mpRelativeTolerance : 1e-9;
       
-      mpSolver->initialize(mTime, 1e-6, 1e-12, mInitConds, atol, rtol, false, false);
+      mpSolver->initialize(mTime, 1e-6, 1e-12, mInitConds, atol, rtol, false);
     }
 }
 

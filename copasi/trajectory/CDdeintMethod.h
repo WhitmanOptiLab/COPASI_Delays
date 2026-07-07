@@ -9,6 +9,7 @@
 
 #include <vector>
 #include <functional>
+#include <sstream>
 
 #include "copasi/core/CVector.h"
 #include "copasi/trajectory/CTrajectoryMethod.h"
@@ -17,8 +18,21 @@
 #include "DDEINT/Methods/Dormand_Prince/DoPri_5.hpp"
 #include "DDEINT/history/history.hpp"
 
+class CDdeintMethod;
+
+// DoPri_5 (the DDE solver) is a template that needs a plain function pointer
+// for its callback -- it has no slot for a 'this' pointer, so a member
+// function like CDdeintMethod::evalF can't be passed to it directly. This
+// free function is what actually gets bound to the solver; it looks up
+// spActiveInstance (see below) and forwards the call to that instance's
+// evalF().
+void CDdeintMethod_dispatch(double t, std::vector<double> &y, std::vector<double> &ydot, History<double, double> &history);
+
 class CDdeintMethod : public CTrajectoryMethod
 {
+  // Needs friend access so it can reach the private spActiveInstance pointer.
+  friend void CDdeintMethod_dispatch(double t,  std::vector<double> &y, std::vector<double> &ydot, History<double, double> &history);
+
 public:
   struct Data
     {
@@ -26,22 +40,20 @@ public:
       CDdeintMethod * pMethod;
     };
 
-
   // Attributes
 protected:
   // mData.dim is the dimension of the system.
-  // mData.pMethod contains CDdeintMethod * this to be used in the static method EvalF
+  // mData.pMethod contains CDdeintMethod * this to be used by the dispatch trampoline
   Data mData;
 
   // current time
   C_FLOAT64 mTime;
 
 private:
-  /*
-   * Global tracking pointer to the active object instance.
-   * Required because the template solver (DoPri_5) calls a static function 
-   * (EvalF) that lacks a 'this' context parameter to access class members.
-   */
+  // Points at whichever CDdeintMethod instance is currently integrating.
+  // CDdeintMethod_dispatch() reads this to know which object's evalF() to
+  // call, since the solver only gives it a free-function callback with no
+  // way to carry instance context.
   static CDdeintMethod * spActiveInstance;
 
   // A pointer to the value of "Relative Tolerance"
@@ -51,11 +63,13 @@ private:
   C_FLOAT64 * mpAbsoluteTolerance;
 
   // A pointer to the value of "Max Internal Steps"
+  // TODO: not yet wired up via assertParameter() in the constructor -- currently unused.
   unsigned C_INT32 * mpMaxInternalSteps;
 
   // A pointer to the value of "Max Internal Step Size"
+  // TODO: not yet wired up via assertParameter() in the constructor -- currently unused.
   C_FLOAT64 * mpMaxInternalStepSize;
-  
+
   // A pointer to the first continuous variable state concentration array inside COPASI
   C_FLOAT64 * mpY;
 
@@ -67,13 +81,18 @@ private:
   std::vector<double> mMaxDelays;
   std::vector<std::function<double(double)>> mPrehistory;
 
-  // Typedef for our template-instantiated Dormand-Prince method
-  typedef DoPri_5<CDdeintMethod::EvalF> DDE_Solver_Type;
-  DDE_Solver_Type* mpSolver;
+  // Captures the message from any exception caught in step(), so it isn't
+  // silently discarded. Mirrors CLsodaMethod's mErrorMsg.
+  std::ostringstream mErrorMsg;
+
+  // Instantiates the Dormand-Prince 5 solver, bound at compile time to our
+  // dispatch trampoline above (not a member function -- see its comment).
+  typedef DoPri_5<CDdeintMethod_dispatch> DDE_Solver_Type;
+  DDE_Solver_Type * mpSolver;
 
   // Operations
 private:
-  // Constructor 
+  // Constructor
   CDdeintMethod();
 
 public:
@@ -113,15 +132,12 @@ public:
    */
   void stateChange(const CMath::StateChange & change) override;
 
-
-  // Evaluated the actual derivtives -- vital for the program
-
-  static void EvalF(double t, std::vector<double> &y, std::vector<double> &ydot, History<double, double> &history);
-
-  // The member function where the actual COPASI container update takes place
-  virtual void evalF(double t, std::vector<double> &y, std::vector<double> &ydot);
-
-
+  // Computes the derivatives (ydot) at time t for state y. Called by
+  // CDdeintMethod_dispatch() on whichever instance is active, potentially
+  // many times per step() call as the solver tries intermediate/rejected
+  // stage values, not just once per accepted step.
+  virtual void evalF(double t, std::vector<double> &y, std::vector<double> &ydot,
+                      History<double, double> &history);
 };
 
 #endif // COPASI_CDdeintMethod
