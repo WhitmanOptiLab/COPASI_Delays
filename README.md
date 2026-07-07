@@ -217,7 +217,7 @@ cmake --build . --parallel
 After the build completes successfully, launch the command-line version of COPASI. Below is an example of how to run "Time-Course" for the Breast Cancer Model.
 
 ```
-./copasi/CopasiSE --scheduled-task "Time-Course" tests/<file.cps>
+build/copasi/CopasiSE/CopasiSE --scheduled-task "Time-Course" tests/DDEINT_tests/cw_model_ddeint.cps
 ```
 
 
