@@ -210,8 +210,6 @@ make -j$(sysctl -n hw.ncpu)
 cmake --build . --parallel
 ```
 
-
-
 ### Step 3 — Running the Application/Tests
 
 After the build completes successfully, launch the command-line version of COPASI. Below is an example of how to run "Time-Course" for the Breast Cancer Model.
@@ -219,5 +217,7 @@ After the build completes successfully, launch the command-line version of COPAS
 ```
 build/copasi/CopasiSE/CopasiSE --scheduled-task "Time-Course" tests/DDEINT_tests/cw_model_ddeint.cps
 ```
+## Benchmarking Tests 
 
+These tests will be located in `DDEINT_Research_Benchmarks` repo and will compare the numerical accuracy of DDEINT with LSODA method using interpolation.
 
