@@ -219,5 +219,5 @@ build/copasi/CopasiSE/CopasiSE --scheduled-task "Time-Course" tests/DDEINT_tests
 ```
 ## Benchmarking Tests 
 
-These tests will be located in `DDEINT_Research_Benchmarks` repo and will compare the numerical accuracy of DDEINT with LSODA method using interpolation.
+These tests will be located in `DDEINT_Research_Benchmarks` repo and will compare the numerical accuracy of DDEINT with the LSODA method using interpolation. These tests will be located in `comparison_tests\copasi_methods_tests`
 
